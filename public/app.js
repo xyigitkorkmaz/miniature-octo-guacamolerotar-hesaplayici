@@ -14,6 +14,8 @@ const resultMeta = $("#resultMeta");
 
 const freeMinutesInput = $("#freeMinutes");
 const ratePerMinuteInput = $("#ratePerMinute");
+const specialStopsInput = $("#specialStops");
+const specialRateInput = $("#specialRatePerMinute");
 const feeTotalDelayEl = $("#feeTotalDelay");
 const feeBillableEl = $("#feeBillable");
 const feeTotalEl = $("#feeTotal");
@@ -137,32 +139,65 @@ function renderResult() {
 
 // ---------- Rötar ücreti hesaplama ----------
 
-function totalDelayMinutes() {
+function parseSpecialStopNames() {
+  return (specialStopsInput.value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isSpecialStop(stopName, specials) {
+  if (!stopName) return false;
+  const name = stopName.toLocaleLowerCase("tr-TR");
+  return specials.some((s) => name.includes(s.toLocaleLowerCase("tr-TR")));
+}
+
+function delayBuckets() {
   // Tüm yönler, tüm seferler, tüm duraklardaki POZİTİF (geç kalma) rötar
-  // dakikalarının toplamı — sitenin kendi hesapladığı resmi değerler
-  // kullanılıyor. Giriş verisi olup sapma yazılmamışsa "zamanında" (0) kabul
-  // edilir; giriş verisi hiç yoksa hesaba katılmaz.
-  let total = 0;
-  if (!currentData) return 0;
+  // dakikaları, "özel durak" olup olmamasına göre iki gruba ayrılır.
+  // Sitenin kendi hesapladığı resmi değerler kullanılıyor. Giriş verisi olup
+  // sapma yazılmamışsa "zamanında" (0) kabul edilir; giriş verisi hiç
+  // yoksa hesaba katılmaz.
+  let normal = 0;
+  let special = 0;
+  if (!currentData) return { normal, special };
+  const specials = parseSpecialStopNames();
   for (const yon of currentData.yonler) {
     for (const sefer of yon.seferler) {
       for (const st of sefer.stops) {
         const rotar = st.giris && typeof st.rotarSiteDk !== "number" ? 0 : st.rotarSiteDk;
-        if (typeof rotar === "number" && rotar > 0) total += rotar;
+        if (typeof rotar === "number" && rotar > 0) {
+          if (isSpecialStop(st.ad, specials)) special += rotar;
+          else normal += rotar;
+        }
       }
     }
   }
-  return total;
+  return { normal, special };
+}
+
+function totalDelayMinutes() {
+  const { normal, special } = delayBuckets();
+  return normal + special;
 }
 
 function renderFee() {
   if (!currentData) return;
   const freeMinutes = Math.max(0, Number(freeMinutesInput.value) || 0);
   const rate = Math.max(0, Number(ratePerMinuteInput.value) || 0);
+  const specialRate = Math.max(0, Number(specialRateInput.value) || 0);
 
-  const total = totalDelayMinutes();
-  const billable = Math.max(0, total - freeMinutes);
-  const fee = Math.round(billable * rate);
+  const { normal, special } = delayBuckets();
+  const total = normal + special;
+
+  // İlk 15 dakikalık serbest süre önce normal (düşük ücretli) duraklardan
+  // düşülür, kalan varsa özel duraklardan düşülür.
+  const normalAfterFree = Math.max(0, normal - freeMinutes);
+  const remainingFree = Math.max(0, freeMinutes - normal);
+  const specialAfterFree = Math.max(0, special - remainingFree);
+
+  const billable = normalAfterFree + specialAfterFree;
+  const fee = Math.round(normalAfterFree * rate + specialAfterFree * specialRate);
 
   feeTotalDelayEl.textContent = `${total} dk`;
   feeBillableEl.textContent = `${billable} dk`;
@@ -171,6 +206,8 @@ function renderFee() {
 
 freeMinutesInput?.addEventListener("input", renderFee);
 ratePerMinuteInput?.addEventListener("input", renderFee);
+specialStopsInput?.addEventListener("input", renderFee);
+specialRateInput?.addEventListener("input", renderFee);
 
 // ---------- Yön özeti (sefer sayısı, ortalama/maks rötar) ----------
 

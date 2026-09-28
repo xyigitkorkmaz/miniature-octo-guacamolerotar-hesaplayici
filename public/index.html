@@ -67,10 +67,18 @@
             <label>Serbest dk
               <input type="number" id="freeMinutes" value="15" min="0" />
             </label>
-            <label>₺/dk
+            <label>Normal ₺/dk
               <input type="number" id="ratePerMinute" value="50" min="0" />
             </label>
           </div>
+        </div>
+        <div class="fee-settings fee-settings-special">
+          <label class="fee-special-label">Özel duraklar <span class="opt">(virgülle ayırın)</span>
+            <input type="text" id="specialStops" value="Akal Evler, Elma Şekeri" />
+          </label>
+          <label>Özel ₺/dk
+            <input type="number" id="specialRatePerMinute" value="100" min="0" />
+          </label>
         </div>
         <div class="fee-stats">
           <div class="fee-stat">
