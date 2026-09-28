@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Rötar Hesaplayıcı</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0f172a" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🚌</span>
+      <div>
+        <h1>Rötar Hesaplayıcı</h1>
+        <p class="subtitle">Plakaya göre sefer rötar takibi</p>
+      </div>
+    </div>
+    <button id="settingsBtn" class="icon-btn" title="Kayıtlı araçlar">⚙︎</button>
+  </header>
+
+  <main>
+    <section class="card query-card">
+      <form id="queryForm" class="query-form">
+        <div class="field">
+          <label for="plaka">Plaka</label>
+          <input id="plaka" name="plaka" placeholder="34 M 1681" autocomplete="off" required />
+        </div>
+        <div class="field">
+          <label for="tarih">Tarih</label>
+          <input id="tarih" name="tarih" type="date" />
+        </div>
+        <div class="field advanced" id="advancedFields">
+          <label for="vehicleId">Vehicle ID <span class="opt">(opsiyonel)</span></label>
+          <input id="vehicleId" name="vehicleId" placeholder="9661" autocomplete="off" />
+        </div>
+        <button type="submit" class="primary-btn" id="submitBtn">
+          <span class="btn-label">Rapor Getir</span>
+          <span class="spinner" hidden></span>
+        </button>
+      </form>
+      <p class="hint">Plaka daha önce kaydedildiyse Vehicle ID otomatik doldurulur.</p>
+    </section>
+
+    <section id="errorBox" class="card error-card" hidden></section>
+
+    <section id="resultBox" class="result-box" hidden>
+      <div class="result-header">
+        <div>
+          <h2 id="resultPlaka">—</h2>
+          <p id="resultMeta" class="result-meta"></p>
+        </div>
+        <div class="legend">
+          <span class="dot on-time"></span> Zamanında
+          <span class="dot late"></span> Geç
+          <span class="dot early"></span> Erken
+        </div>
+      </div>
+
+      <div class="fee-card">
+        <div class="fee-header">
+          <h3>💰 Rötar Ücreti Hesaplama</h3>
+          <div class="fee-settings">
+            <label>Serbest dk
+              <input type="number" id="freeMinutes" value="15" min="0" />
+            </label>
+            <label>₺/dk
+              <input type="number" id="ratePerMinute" value="50" min="0" />
+            </label>
+          </div>
+        </div>
+        <div class="fee-stats">
+          <div class="fee-stat">
+            <span class="fee-label">Toplam Gecikme</span>
+            <span class="fee-value" id="feeTotalDelay">0 dk</span>
+          </div>
+          <div class="fee-stat">
+            <span class="fee-label">Ücretlendirilen</span>
+            <span class="fee-value" id="feeBillable">0 dk</span>
+          </div>
+          <div class="fee-stat fee-stat-highlight">
+            <span class="fee-label">Rötar Ücreti</span>
+            <span class="fee-value fee-total" id="feeTotal">0 ₺</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="directionTabs" class="tabs"></div>
+      <div id="directionStats" class="direction-stats"></div>
+      <div id="tripTabs" class="chip-row"></div>
+      <div id="tableWrap" class="table-wrap"></div>
+    </section>
+
+    <section id="emptyState" class="empty-state">
+      <div class="empty-icon">🕓</div>
+      <p>Bir plaka girip <strong>Rapor Getir</strong>'e basın.</p>
+    </section>
+  </main>
+</div>
+
+<!-- Ayarlar / Kayıtlı araçlar modalı -->
+<div id="settingsModal" class="modal-backdrop" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Kayıtlı Araçlar</h3>
+      <button class="icon-btn" id="closeSettings">✕</button>
+    </div>
+
+    <form id="vehicleForm" class="vehicle-form">
+      <input name="plaka" placeholder="Plaka (34M1681)" required />
+      <input name="vehicleId" placeholder="Vehicle ID" required />
+      <input name="hatId" placeholder="Hat ID (opsiyonel)" />
+      <input name="kod" placeholder="Kod (opsiyonel)" />
+      <input name="hatAdi" placeholder="Hat Adı (opsiyonel)" />
+      <button type="submit" class="primary-btn small">Kaydet</button>
+    </form>
+
+    <div id="vehicleList" class="vehicle-list"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
