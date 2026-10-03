@@ -1,9 +1,17 @@
 {
-  "34M1681": {
-    "plaka": "34M1681",
-    "vehicleId": "9661",
-    "hatId": "512",
-    "kod": "TB20",
-    "hatAdi": "4 NOLU GRUP"
-  }
+  "34TMC99": { "plaka": "34TMC99", "vehicleId": "5098", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TME33": { "plaka": "34TME33", "vehicleId": "8534", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMD88": { "plaka": "34TMD88", "vehicleId": "8577", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMD44": { "plaka": "34TMD44", "vehicleId": "8496", "hatId": "", "kod": "", "hatAdi": "" },
+  "34M0771": { "plaka": "34M0771", "vehicleId": "8515", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMG16": { "plaka": "34TMG16", "vehicleId": "8498", "hatId": "", "kod": "", "hatAdi": "" },
+  "34M1681": { "plaka": "34M1681", "vehicleId": "9661", "hatId": "512", "kod": "TB20", "hatAdi": "4 NOLU GRUP" },
+  "34TMC88": { "plaka": "34TMC88", "vehicleId": "8517", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMF85": { "plaka": "34TMF85", "vehicleId": "8502", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMG39": { "plaka": "34TMG39", "vehicleId": "8520", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMD05": { "plaka": "34TMD05", "vehicleId": "8510", "hatId": "", "kod": "", "hatAdi": "" },
+  "34M2892": { "plaka": "34M2892", "vehicleId": "9659", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TME07": { "plaka": "34TME07", "vehicleId": "8540", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMD04": { "plaka": "34TMD04", "vehicleId": "8492", "hatId": "", "kod": "", "hatAdi": "" },
+  "34TMD75": { "plaka": "34TMD75", "vehicleId": "8203", "hatId": "", "kod": "", "hatAdi": "" }
 }

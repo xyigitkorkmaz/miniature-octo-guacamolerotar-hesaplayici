@@ -109,7 +109,7 @@ label {
 }
 .opt { font-weight: 400; color: #5c6c88; }
 
-input {
+input, select {
   background: #0d1526;
   border: 1px solid var(--card-border);
   color: var(--text);
@@ -119,9 +119,12 @@ input {
   width: 100%;
   outline: none;
   transition: border-color 0.15s ease;
+  font-family: inherit;
 }
-input:focus { border-color: var(--accent); }
+input:focus, select:focus { border-color: var(--accent); }
 input::placeholder { color: #4b5b78; }
+select { cursor: pointer; }
+select option { background: #0d1526; color: var(--text); }
 
 /* date input icon color on dark bg */
 input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
@@ -516,7 +519,8 @@ tbody tr:hover { background: rgba(79,140,255,0.05); }
     --accent: #2563eb;
     --accent-dim: #dbe6ff;
   }
-  input { background: #f7f9fd; color: var(--text); }
+  input, select { background: #f7f9fd; color: var(--text); }
+  select option { background: #f7f9fd; color: var(--text); }
   thead th { background: #f0f3fa; }
   .modal-backdrop { background: rgba(15,23,42,0.35); }
 }

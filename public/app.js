@@ -42,6 +42,32 @@ async function loadVehicles() {
   const res = await fetch("/api/vehicles");
   knownVehicles = await res.json();
   renderVehicleList();
+  renderPlakaOptions();
+}
+
+function renderPlakaOptions() {
+  const select = $("#plaka");
+  const previous = select.value;
+  const entries = Object.values(knownVehicles).sort((a, b) => a.plaka.localeCompare(b.plaka, "tr"));
+
+  select.innerHTML = `<option value="" disabled>Araç seçin…</option>`;
+  for (const v of entries) {
+    const opt = document.createElement("option");
+    opt.value = v.plaka;
+    opt.textContent = v.hatAdi ? `${v.plaka} — ${v.hatAdi}` : v.plaka;
+    select.appendChild(opt);
+  }
+
+  if (entries.length === 0) {
+    select.querySelector("option").textContent = "Önce ⚙︎ menüsünden araç ekleyin";
+  }
+
+  // Önceki seçim hâlâ listede varsa koru
+  if (previous && knownVehicles[previous]) {
+    select.value = previous;
+  } else {
+    select.selectedIndex = 0;
+  }
 }
 
 function renderVehicleList() {
@@ -69,13 +95,11 @@ function renderVehicleList() {
   }
 }
 
-// Plaka alanına yazınca kayıtlıysa VehicleId'yi otomatik doldur
-$("#plaka").addEventListener("blur", (e) => {
+// Plaka seçilince kayıtlı VehicleId'yi otomatik doldur
+$("#plaka").addEventListener("change", (e) => {
   const p = normalizePlaka(e.target.value);
   const known = knownVehicles[p];
-  if (known) {
-    $("#vehicleId").value = known.vehicleId;
-  }
+  $("#vehicleId").value = known ? known.vehicleId : "";
 });
 
 queryForm.addEventListener("submit", async (e) => {
