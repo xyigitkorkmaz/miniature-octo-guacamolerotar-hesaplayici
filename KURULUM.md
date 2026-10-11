@@ -36,7 +36,7 @@ git push
 ```
 
 4. Render otomatik deploy eder. **Logs** sekmesinde şunları görmelisin:
-   - "vehicles.json'dan 15 araç veritabanına aktarıldı."
+   - "vehicles.json'dan 15 yeni araç veritabanına eklendi."
    - "İlk yönetici oluşturuldu: admin"
 5. Siteyi aç → giriş ekranı gelir → ADMIN_USERNAME / ADMIN_PASSWORD ile gir.
 
@@ -55,6 +55,15 @@ node server.js
 
 Tarayıcıdan http://localhost:8788 aç. (DATABASE_URL yoksa araçlar vehicles.json'da,
 kullanıcılar users.json'da tutulur; users.json git'e gitmez.)
+
+## Plaka ekleme
+
+İki yol da çalışır:
+- Sitede ⚙︎ simgesinden ekle (anında kaydolur).
+- `vehicles.json`'a satır ekleyip `git push` yap. Sunucu her açılışta dosyadaki
+  veritabanında olmayan araçları ekler (var olanlara dokunmaz).
+  Not: ⚙︎'den sildiğin bir plaka dosyada duruyorsa yeniden başlatmada geri gelir;
+  silmek için dosyadan da çıkar.
 
 ## Dosyalar
 

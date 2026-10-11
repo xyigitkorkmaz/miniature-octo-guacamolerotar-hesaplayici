@@ -338,21 +338,19 @@ async function initDb() {
       hat_adi    TEXT NOT NULL DEFAULT '',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
-  // İlk açılışta tablo boşsa vehicles.json'daki araçları içeri aktar
-  const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM vehicles");
-  if (rows[0].n === 0) {
-    const seed = await readVehiclesFile();
-    for (const v of Object.values(seed)) {
-      await upsertVehicle({
-        plaka: normalizePlaka(v.plaka),
-        vehicleId: String(v.vehicleId),
-        hatId: v.hatId || "",
-        kod: v.kod || "",
-        hatAdi: v.hatAdi || "",
-      });
-    }
-    console.log(`vehicles.json'dan ${Object.keys(seed).length} araç veritabanına aktarıldı.`);
+  // vehicles.json'daki araçlardan veritabanında OLMAYANLARI ekle (var olanlara dokunmaz).
+  // Böylece vehicles.json'a plaka ekleyip push etmek eskisi gibi çalışır.
+  const seed = await readVehiclesFile();
+  let added = 0;
+  for (const v of Object.values(seed)) {
+    const r = await pool.query(
+      `INSERT INTO vehicles (plaka, vehicle_id, hat_id, kod, hat_adi)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (plaka) DO NOTHING`,
+      [normalizePlaka(v.plaka), String(v.vehicleId), v.hatId || "", v.kod || "", v.hatAdi || ""]
+    );
+    added += r.rowCount;
   }
+  if (added) console.log(`vehicles.json'dan ${added} yeni araç veritabanına eklendi.`);
 }
 
 // Eski formatla aynı: { "34M1681": { plaka, vehicleId, hatId, kod, hatAdi }, ... }
