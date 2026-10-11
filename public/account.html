@@ -59,6 +59,23 @@
     <button id="addBtn">Kullanıcı ekle</button>
     <div class="msg" id="addMsg"></div>
   </section>
+  <section id="devs" hidden>
+    <h2>Cihazlar</h2>
+    <p style="margin:0 0 8px;color:var(--muted);font-size:14px">Kayıtlı cihazlar şifre sormadan girer. Diğer cihazlar şifreyle girer ve oturumları 1 gün sürer. Bir cihazı kaldırırsan o cihaz anında düşer.</p>
+    <div id="devList"></div>
+    <h2 style="margin-top:22px">Yeni cihaz kaydet</h2>
+    <div class="grid">
+      <div><label for="dn">Cihaz adı</label><input id="dn" placeholder="örn. Ahmet telefon" maxlength="40" autocomplete="off"></div>
+      <div><label for="du">Hangi kullanıcı olarak girsin?</label><select id="du"></select></div>
+    </div>
+    <button id="devBtn">Bağlantı oluştur</button>
+    <div class="msg" id="devMsg"></div>
+    <div id="linkBox" hidden>
+      <label for="devLink">Bu bağlantıyı o telefona gönder (tek kullanımlık, 3 gün geçerli)</label>
+      <input id="devLink" readonly>
+      <button id="copyBtn" class="ghost" type="button">Kopyala</button>
+    </div>
+  </section>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -87,6 +104,7 @@
 
   async function loadUsers() {
     const users = await api("/api/admin/users");
+    fillUserSelect(users);
     const box = $("list"); box.replaceChildren();
     for (const u of users) {
       const row = document.createElement("div"); row.className = "row";
@@ -108,7 +126,7 @@
         const del = document.createElement("button"); del.className = "small danger"; del.textContent = "Sil";
         del.onclick = async () => {
           if (!confirm(u.username + " silinsin mi?")) return;
-          try { await api("/api/admin/users/" + encodeURIComponent(u.username), "DELETE"); loadUsers(); }
+          try { await api("/api/admin/users/" + encodeURIComponent(u.username), "DELETE"); loadUsers(); loadSessions(); }
           catch (e) { alert(e.message); }
         };
         actions.appendChild(del);
@@ -116,6 +134,58 @@
       row.append(name, actions); box.appendChild(row);
     }
   }
+
+  function fillUserSelect(users) {
+    const sel = $("du"); sel.replaceChildren();
+    for (const u of users) {
+      const o = document.createElement("option"); o.value = u.username; o.textContent = u.username; sel.appendChild(o);
+    }
+  }
+
+  async function loadSessions() {
+    const list = await api("/api/admin/sessions");
+    const box = $("devList"); box.replaceChildren();
+    if (!list.length) { box.textContent = "Henüz cihaz yok."; return; }
+    for (const s of list) {
+      const row = document.createElement("div"); row.className = "row";
+      const info = document.createElement("div");
+      const title = document.createElement("div");
+      title.textContent = s.deviceName ? s.deviceName + " (" + s.username + ")" : s.username;
+      const kind = document.createElement("span"); kind.className = "badge";
+      kind.textContent = s.pending ? "bağlanmayı bekliyor" : s.permanent ? "kayıtlı cihaz" : "şifreyle giriş";
+      title.appendChild(kind);
+      if (s.current) { const b = document.createElement("span"); b.className = "badge"; b.textContent = "bu cihaz"; title.appendChild(b); }
+      const sub = document.createElement("div");
+      sub.style.cssText = "font-size:13px;color:var(--muted)";
+      sub.textContent = s.pending
+        ? "Bağlantı oluşturuldu: " + new Date(s.createdAt).toLocaleString("tr-TR")
+        : s.deviceInfo + " · son görülme: " + new Date(s.lastSeenAt).toLocaleString("tr-TR");
+      info.append(title, sub); row.appendChild(info);
+      if (!s.current) {
+        const del = document.createElement("button"); del.className = "small danger"; del.textContent = "Kaldır";
+        del.onclick = async () => {
+          if (!confirm((s.deviceName || s.username) + " kaldırılsın mı?")) return;
+          try { await api("/api/admin/sessions/" + encodeURIComponent(s.id), "DELETE"); loadSessions(); }
+          catch (e) { alert(e.message); }
+        };
+        row.appendChild(del);
+      }
+      box.appendChild(row);
+    }
+  }
+
+  $("devBtn").onclick = async () => {
+    try {
+      const d = await api("/api/admin/devices", "POST", { name: $("dn").value, username: $("du").value });
+      $("devLink").value = d.link; $("linkBox").hidden = false; $("dn").value = "";
+      say($("devMsg"), "Bağlantı hazır. Telefona gönder.", true);
+      loadSessions();
+    } catch (e) { say($("devMsg"), e.message, false); }
+  };
+  $("copyBtn").onclick = async () => {
+    try { await navigator.clipboard.writeText($("devLink").value); say($("devMsg"), "Kopyalandı.", true); }
+    catch { $("devLink").select(); }
+  };
 
   $("addBtn").onclick = async () => {
     try {
@@ -129,7 +199,7 @@
   (async () => {
     me = await api("/api/me");
     $("who").textContent = me.username + (me.role === "admin" ? " (yönetici)" : "");
-    if (me.role === "admin") { $("admin").hidden = false; loadUsers(); }
+    if (me.role === "admin") { $("admin").hidden = false; $("devs").hidden = false; loadUsers(); loadSessions(); }
   })();
 </script>
 </body>

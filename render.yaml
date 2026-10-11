@@ -16,9 +16,3 @@ services:
         fromDatabase:
           name: rotar-db
           property: connectionString
-      - key: SESSION_SECRET
-        generateValue: true
-      - key: ADMIN_USERNAME
-        value: admin
-      - key: ADMIN_PASSWORD
-        sync: false
