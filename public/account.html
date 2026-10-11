@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hesap — Rötar Hesaplayıcı</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#16202a; --muted:#6b7785; --line:#d9dfe5; --accent:#2f7df6; --err:#d63b3b; --ok:#1f9d55; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141a; --card:#171e26; --text:#e8edf2; --muted:#8a96a3; --line:#2a343f; --accent:#4d94ff; --err:#ff6b6b; --ok:#4cd08a; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--line); background:var(--card); }
+  header a { color:var(--accent); text-decoration:none; margin-left:14px; font-size:14px; }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  h2 { margin:0 0 12px; font-size:17px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 5px; }
+  input, select { width:100%; padding:10px 11px; font:inherit; color:var(--text); background:transparent; border:1px solid var(--line); border-radius:8px; }
+  select option { color:#000; }
+  button { padding:10px 14px; font:inherit; font-weight:600; color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; margin-top:14px; }
+  button.small { margin:0 0 0 6px; padding:6px 10px; font-size:13px; }
+  button.danger { background:var(--err); }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  .msg { min-height:20px; margin-top:10px; font-size:14px; }
+  .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+  .row:first-child { border-top:0; }
+  .badge { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); margin-left:8px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:480px) { .grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <strong id="who">Hesap</strong>
+  <nav><a href="/">Ana sayfa</a><a href="/logout">Çıkış</a></nav>
+</header>
+<main>
+  <section>
+    <h2>Şifremi değiştir</h2>
+    <label for="cp">Mevcut şifre</label><input id="cp" type="password" autocomplete="current-password">
+    <label for="np">Yeni şifre (en az 8 karakter)</label><input id="np" type="password" autocomplete="new-password">
+    <button id="pwBtn">Şifreyi güncelle</button>
+    <div class="msg" id="pwMsg"></div>
+  </section>
+
+  <section id="admin" hidden>
+    <h2>Kullanıcılar</h2>
+    <div id="list"></div>
+    <h2 style="margin-top:22px">Yeni kullanıcı ekle</h2>
+    <div class="grid">
+      <div><label for="nu">Kullanıcı adı</label><input id="nu" autocapitalize="none" autocomplete="off"></div>
+      <div><label for="npw">Şifre</label><input id="npw" type="text" autocomplete="off"></div>
+    </div>
+    <label for="nr">Rol</label>
+    <select id="nr"><option value="user">Kullanıcı</option><option value="admin">Yönetici</option></select>
+    <button id="addBtn">Kullanıcı ekle</button>
+    <div class="msg" id="addMsg"></div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let me = null;
+
+  async function api(url, method = "GET", body) {
+    const r = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (r.status === 401) { location.href = "/login.html"; throw new Error("auth"); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "Hata");
+    return d;
+  }
+  function say(el, text, ok) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
+
+  $("pwBtn").onclick = async () => {
+    try {
+      await api("/api/me/password", "POST", { currentPassword: $("cp").value, newPassword: $("np").value });
+      $("cp").value = ""; $("np").value = "";
+      say($("pwMsg"), "Şifre güncellendi.", true);
+    } catch (e) { say($("pwMsg"), e.message, false); }
+  };
+
+  async function loadUsers() {
+    const users = await api("/api/admin/users");
+    const box = $("list"); box.replaceChildren();
+    for (const u of users) {
+      const row = document.createElement("div"); row.className = "row";
+      const name = document.createElement("div");
+      name.textContent = u.username;
+      const badge = document.createElement("span"); badge.className = "badge";
+      badge.textContent = u.role === "admin" ? "yönetici" : "kullanıcı";
+      name.appendChild(badge);
+      const actions = document.createElement("div");
+      const reset = document.createElement("button"); reset.className = "small ghost"; reset.textContent = "Şifre sıfırla";
+      reset.onclick = async () => {
+        const pw = prompt(u.username + " için yeni şifre (en az 8 karakter):");
+        if (!pw) return;
+        try { await api("/api/admin/users/" + encodeURIComponent(u.username) + "/password", "PUT", { password: pw }); alert("Şifre güncellendi."); }
+        catch (e) { alert(e.message); }
+      };
+      actions.appendChild(reset);
+      if (u.username !== me.username) {
+        const del = document.createElement("button"); del.className = "small danger"; del.textContent = "Sil";
+        del.onclick = async () => {
+          if (!confirm(u.username + " silinsin mi?")) return;
+          try { await api("/api/admin/users/" + encodeURIComponent(u.username), "DELETE"); loadUsers(); }
+          catch (e) { alert(e.message); }
+        };
+        actions.appendChild(del);
+      }
+      row.append(name, actions); box.appendChild(row);
+    }
+  }
+
+  $("addBtn").onclick = async () => {
+    try {
+      await api("/api/admin/users", "POST", { username: $("nu").value, password: $("npw").value, role: $("nr").value });
+      $("nu").value = ""; $("npw").value = "";
+      say($("addMsg"), "Kullanıcı eklendi.", true);
+      loadUsers();
+    } catch (e) { say($("addMsg"), e.message, false); }
+  };
+
+  (async () => {
+    me = await api("/api/me");
+    $("who").textContent = me.username + (me.role === "admin" ? " (yönetici)" : "");
+    if (me.role === "admin") { $("admin").hidden = false; loadUsers(); }
+  })();
+</script>
+</body>
+</html>

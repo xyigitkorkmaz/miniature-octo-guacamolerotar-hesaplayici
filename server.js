@@ -7,6 +7,9 @@ import express from "express";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import pg from "pg";
+import crypto from "crypto";
+import { promisify } from "util";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8788;
@@ -14,12 +17,300 @@ const VEHICLES_PATH = path.join(__dirname, "vehicles.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json());
+
+// ====================== Kullanıcılar & oturum ======================
+// <auth-helpers>
+const scrypt = promisify(crypto.scrypt);
+const COOKIE_NAME = "rotar_session";
+const SESSION_DAYS = 30;
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.SESSION_SECRET) {
+  console.warn("SESSION_SECRET tanımlı değil: sunucu her yeniden başlatıldığında herkes çıkış yapar.");
+}
+let DUMMY_HASH = "";
+
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = await scrypt(password, salt, 64);
+  return `${salt.toString("hex")}:${hash.toString("hex")}`;
+}
+
+async function verifyPassword(password, stored) {
+  const [saltHex, hashHex] = (stored || "").split(":");
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, "hex");
+  const actual = await scrypt(password, Buffer.from(saltHex, "hex"), expected.length);
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+// Şifre değişince eski oturumlar geçersiz olsun diye token'a şifre özetinin parmak izi girer
+function fingerprint(passwordHash) {
+  return crypto.createHash("sha256").update(passwordHash).digest("hex").slice(0, 16);
+}
+
+function signToken(user) {
+  const payload = Buffer.from(
+    JSON.stringify({ u: user.username, h: fingerprint(user.passwordHash), exp: Date.now() + SESSION_DAYS * 864e5 })
+  ).toString("base64url");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+function readToken(token) {
+  if (!token) return null;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const d = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return d.exp > Date.now() ? d : null;
+  } catch {
+    return null;
+  }
+}
+// </auth-helpers>
+
+function getCookie(req, name) {
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+
+function setSessionCookie(req, res, token, maxAgeSec) {
+  const parts = [`${COOKIE_NAME}=${token}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAgeSec}`];
+  if (req.secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+const normalizeUsername = (u) => String(u || "").trim().toLowerCase();
+const validUsername = (u) => /^[a-z0-9._-]{3,32}$/.test(u);
+const validPassword = (p) => typeof p === "string" && p.length >= 8 && p.length <= 200;
+const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+// ---- Kullanıcı deposu (PostgreSQL; DATABASE_URL yoksa users.json) ----
+const USERS_PATH = path.join(__dirname, "users.json");
+
+async function readUsersFile() {
+  try {
+    const raw = await fs.readFile(USERS_PATH, "utf8");
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+const writeUsersFile = (o) => fs.writeFile(USERS_PATH, JSON.stringify(o, null, 2), "utf8");
+
+function rowToUser(r) {
+  return { username: r.username, passwordHash: r.password_hash, role: r.role, createdAt: r.created_at };
+}
+
+async function getUser(username) {
+  if (!username) return null;
+  if (!pool) return (await readUsersFile())[username] || null;
+  const { rows } = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
+  return rows[0] ? rowToUser(rows[0]) : null;
+}
+
+async function listUsers() {
+  if (!pool) return Object.values(await readUsersFile());
+  const { rows } = await pool.query("SELECT * FROM users ORDER BY created_at");
+  return rows.map(rowToUser);
+}
+
+async function createUser(username, passwordHash, role) {
+  if (!pool) {
+    const all = await readUsersFile();
+    if (all[username]) return false;
+    all[username] = { username, passwordHash, role, createdAt: new Date().toISOString() };
+    await writeUsersFile(all);
+    return true;
+  }
+  const r = await pool.query(
+    "INSERT INTO users (username, password_hash, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+    [username, passwordHash, role]
+  );
+  return r.rowCount === 1;
+}
+
+async function setUserPassword(username, passwordHash) {
+  if (!pool) {
+    const all = await readUsersFile();
+    if (all[username]) all[username].passwordHash = passwordHash;
+    await writeUsersFile(all);
+    return;
+  }
+  await pool.query("UPDATE users SET password_hash = $2 WHERE username = $1", [username, passwordHash]);
+}
+
+async function removeUser(username) {
+  if (!pool) {
+    const all = await readUsersFile();
+    delete all[username];
+    await writeUsersFile(all);
+    return;
+  }
+  await pool.query("DELETE FROM users WHERE username = $1", [username]);
+}
+
+async function initUsers() {
+  DUMMY_HASH = await hashPassword("dummy-password");
+  if (pool) {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        username      TEXT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        role          TEXT NOT NULL DEFAULT 'user',
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`);
+  } else {
+    console.warn("DATABASE_URL tanımlı değil: kullanıcılar users.json'da tutuluyor (Render'da kalıcı değildir!)");
+  }
+  if ((await listUsers()).length > 0) return;
+
+  const username = normalizeUsername(process.env.ADMIN_USERNAME || "admin");
+  let password = process.env.ADMIN_PASSWORD;
+  let generated = false;
+  if (!validPassword(password)) {
+    password = crypto.randomBytes(9).toString("base64url");
+    generated = true;
+  }
+  await createUser(username, await hashPassword(password), "admin");
+  if (generated) {
+    console.log(`İlk yönetici oluşturuldu -> kullanıcı: ${username}  şifre: ${password}  (giriş yapınca değiştir!)`);
+  } else {
+    console.log(`İlk yönetici oluşturuldu: ${username}`);
+  }
+}
+
+// ---- Giriş (kapının dışında) ----
+const loginAttempts = new Map();
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const recent = (loginAttempts.get(ip) || []).filter((t) => now - t < 15 * 60 * 1000);
+  loginAttempts.set(ip, recent);
+  return recent.length >= 10;
+}
+
+app.post("/api/auth/login", wrap(async (req, res) => {
+  if (tooManyAttempts(req.ip)) {
+    return res.status(429).json({ error: "Çok fazla deneme. 15 dakika sonra tekrar dene." });
+  }
+  const { username: uIn, password } = req.body || {};
+  const user = await getUser(normalizeUsername(uIn));
+  const ok = await verifyPassword(String(password || ""), user ? user.passwordHash : DUMMY_HASH);
+  if (!user || !ok) {
+    loginAttempts.get(req.ip).push(Date.now());
+    return res.status(401).json({ error: "Kullanıcı adı veya şifre hatalı" });
+  }
+  loginAttempts.delete(req.ip);
+  setSessionCookie(req, res, signToken(user), SESSION_DAYS * 86400);
+  res.json({ ok: true, username: user.username, role: user.role });
+}));
+
+// ---- Kapı: bundan sonraki her şey giriş ister ----
+const PUBLIC_PATHS = new Set(["/login.html", "/manifest.json", "/icon.svg", "/sw.js", "/favicon.ico"]);
+
+app.use(async (req, res, next) => {
+  try {
+    if (PUBLIC_PATHS.has(req.path)) return next();
+    const session = readToken(getCookie(req, COOKIE_NAME));
+    const user = session ? await getUser(session.u) : null;
+    if (user && session.h === fingerprint(user.passwordHash)) {
+      req.user = { username: user.username, role: user.role };
+      return next();
+    }
+    if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Giriş gerekli" });
+    return res.redirect("/login.html");
+  } catch (err) {
+    next(err);
+  }
+});
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") return res.status(403).json({ error: "Bu işlem için yönetici olmalısın" });
+  next();
+}
+
+app.get("/api/me", (req, res) => res.json(req.user));
+
+app.get("/logout", (req, res) => {
+  setSessionCookie(req, res, "", 0);
+  res.redirect("/login.html");
+});
+app.post("/api/auth/logout", (req, res) => {
+  setSessionCookie(req, res, "", 0);
+  res.json({ ok: true });
+});
+
+app.post("/api/me/password", wrap(async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const user = await getUser(req.user.username);
+  if (!(await verifyPassword(String(currentPassword || ""), user.passwordHash))) {
+    return res.status(400).json({ error: "Mevcut şifre hatalı" });
+  }
+  if (!validPassword(newPassword)) return res.status(400).json({ error: "Yeni şifre en az 8 karakter olmalı" });
+  user.passwordHash = await hashPassword(newPassword);
+  await setUserPassword(user.username, user.passwordHash);
+  setSessionCookie(req, res, signToken(user), SESSION_DAYS * 86400); // bu oturum devam etsin
+  res.json({ ok: true });
+}));
+
+// ---- Yönetici: kullanıcı yönetimi ----
+app.get("/api/admin/users", requireAdmin, wrap(async (req, res) => {
+  const users = await listUsers();
+  res.json(users.map((u) => ({ username: u.username, role: u.role, createdAt: u.createdAt })));
+}));
+
+app.post("/api/admin/users", requireAdmin, wrap(async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  const { password } = req.body || {};
+  const role = req.body?.role === "admin" ? "admin" : "user";
+  if (!validUsername(username)) {
+    return res.status(400).json({ error: "Kullanıcı adı 3-32 karakter olmalı (harf, rakam, . _ -)" });
+  }
+  if (!validPassword(password)) return res.status(400).json({ error: "Şifre en az 8 karakter olmalı" });
+  const created = await createUser(username, await hashPassword(password), role);
+  if (!created) return res.status(409).json({ error: "Bu kullanıcı adı zaten var" });
+  res.json({ username, role });
+}));
+
+app.put("/api/admin/users/:username/password", requireAdmin, wrap(async (req, res) => {
+  const username = normalizeUsername(req.params.username);
+  if (!(await getUser(username))) return res.status(404).json({ error: "Kullanıcı bulunamadı" });
+  if (!validPassword(req.body?.password)) return res.status(400).json({ error: "Şifre en az 8 karakter olmalı" });
+  await setUserPassword(username, await hashPassword(req.body.password));
+  res.json({ ok: true });
+}));
+
+app.delete("/api/admin/users/:username", requireAdmin, wrap(async (req, res) => {
+  const username = normalizeUsername(req.params.username);
+  if (username === req.user.username) return res.status(400).json({ error: "Kendi hesabını silemezsin" });
+  await removeUser(username);
+  res.json({ ok: true });
+}));
+
 app.use(express.static(PUBLIC_DIR));
 
 // ---------- Yardımcı fonksiyonlar ----------
 
-async function readVehicles() {
+// ---------- Veri depolama (PostgreSQL; DATABASE_URL yoksa vehicles.json'a düşer) ----------
+
+const DATABASE_URL = process.env.DATABASE_URL;
+const pool = DATABASE_URL
+  ? new pg.Pool({
+      connectionString: DATABASE_URL,
+      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+    })
+  : null;
+
+async function readVehiclesFile() {
   try {
     const raw = await fs.readFile(VEHICLES_PATH, "utf8");
     if (!raw.trim()) return {};
@@ -29,8 +320,80 @@ async function readVehicles() {
   }
 }
 
-async function saveVehicles(obj) {
-  await fs.writeFile(VEHICLES_PATH, JSON.stringify(obj, null, 2), "utf8");
+function rowToEntry(r) {
+  return { plaka: r.plaka, vehicleId: r.vehicle_id, hatId: r.hat_id, kod: r.kod, hatAdi: r.hat_adi };
+}
+
+async function initDb() {
+  if (!pool) {
+    console.warn("DATABASE_URL tanımlı değil: vehicles.json kullanılıyor (Render'da kalıcı değildir!)");
+    return;
+  }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS vehicles (
+      plaka      TEXT PRIMARY KEY,
+      vehicle_id TEXT NOT NULL,
+      hat_id     TEXT NOT NULL DEFAULT '',
+      kod        TEXT NOT NULL DEFAULT '',
+      hat_adi    TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+  // İlk açılışta tablo boşsa vehicles.json'daki araçları içeri aktar
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS n FROM vehicles");
+  if (rows[0].n === 0) {
+    const seed = await readVehiclesFile();
+    for (const v of Object.values(seed)) {
+      await upsertVehicle({
+        plaka: normalizePlaka(v.plaka),
+        vehicleId: String(v.vehicleId),
+        hatId: v.hatId || "",
+        kod: v.kod || "",
+        hatAdi: v.hatAdi || "",
+      });
+    }
+    console.log(`vehicles.json'dan ${Object.keys(seed).length} araç veritabanına aktarıldı.`);
+  }
+}
+
+// Eski formatla aynı: { "34M1681": { plaka, vehicleId, hatId, kod, hatAdi }, ... }
+async function readVehicles() {
+  if (!pool) return readVehiclesFile();
+  const { rows } = await pool.query("SELECT * FROM vehicles ORDER BY plaka");
+  return Object.fromEntries(rows.map((r) => [r.plaka, rowToEntry(r)]));
+}
+
+async function getVehicle(plaka) {
+  if (!pool) return (await readVehiclesFile())[plaka] || null;
+  const { rows } = await pool.query("SELECT * FROM vehicles WHERE plaka = $1", [plaka]);
+  return rows[0] ? rowToEntry(rows[0]) : null;
+}
+
+async function upsertVehicle(e) {
+  if (!pool) {
+    const all = await readVehiclesFile();
+    all[e.plaka] = e;
+    await fs.writeFile(VEHICLES_PATH, JSON.stringify(all, null, 2), "utf8");
+    return e;
+  }
+  await pool.query(
+    `INSERT INTO vehicles (plaka, vehicle_id, hat_id, kod, hat_adi)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (plaka) DO UPDATE
+       SET vehicle_id = EXCLUDED.vehicle_id, hat_id = EXCLUDED.hat_id,
+           kod = EXCLUDED.kod, hat_adi = EXCLUDED.hat_adi, updated_at = now()`,
+    [e.plaka, e.vehicleId, e.hatId, e.kod, e.hatAdi]
+  );
+  return e;
+}
+
+async function deleteVehicle(plaka) {
+  if (!pool) {
+    const all = await readVehiclesFile();
+    delete all[plaka];
+    await fs.writeFile(VEHICLES_PATH, JSON.stringify(all, null, 2), "utf8");
+    return;
+  }
+  await pool.query("DELETE FROM vehicles WHERE plaka = $1", [plaka]);
 }
 
 function normalizePlaka(plaka) {
@@ -247,8 +610,7 @@ function addDelayCalculations(parsed) {
 
 async function getReport(plakaIn, date, vehicleIdIn, hatIdIn) {
   const plaka = normalizePlaka(plakaIn);
-  const vehicles = await readVehicles();
-  const known = vehicles[plaka] || null;
+  const known = await getVehicle(plaka);
 
   let vehicleId = vehicleIdIn || (known ? String(known.vehicleId) : "");
   let hatId = hatIdIn || (known ? String(known.hatId) : "");
@@ -305,18 +667,14 @@ app.post("/api/vehicles", async (req, res) => {
   if (!plaka || !vehicleId) {
     return res.status(400).json({ error: "plaka ve vehicleId gerekli" });
   }
-  const all = await readVehicles();
   const entry = { plaka, vehicleId: String(vehicleId), hatId: hatId ? String(hatId) : "", kod: kod ? String(kod) : "", hatAdi: hatAdi ? String(hatAdi) : "" };
-  all[plaka] = entry;
-  await saveVehicles(all);
+  await upsertVehicle(entry);
   res.json(entry);
 });
 
 app.delete("/api/vehicles/:plaka", async (req, res) => {
   const plaka = normalizePlaka(req.params.plaka);
-  const all = await readVehicles();
-  delete all[plaka];
-  await saveVehicles(all);
+  await deleteVehicle(plaka);
   res.json({ ok: true });
 });
 
@@ -329,6 +687,14 @@ app.get("/api/report", async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "Sunucu hatası" });
+});
+
+await initDb();
+await initUsers();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Rötar hesaplayıcı çalışıyor: http://0.0.0.0:${PORT}`);
