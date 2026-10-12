@@ -14,8 +14,6 @@ const resultMeta = $("#resultMeta");
 
 const freeMinutesInput = $("#freeMinutes");
 const ratePerMinuteInput = $("#ratePerMinute");
-const specialStopsInput = $("#specialStops");
-const specialRateInput = $("#specialRatePerMinute");
 const feeTotalDelayEl = $("#feeTotalDelay");
 const feeBillableEl = $("#feeBillable");
 const feeTotalEl = $("#feeTotal");
@@ -163,17 +161,40 @@ function renderResult() {
 
 // ---------- Rötar ücreti hesaplama ----------
 
-function parseSpecialStopNames() {
-  return (specialStopsInput.value || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+// Özel duraklar (kodun içinde sabit). Grup numarasına göre belirlenir.
+const SPECIAL_RATE = 100; // ₺/dk
+const SPECIAL_STOPS_BY_GROUP = {
+  "4": ["Akal Evler", "Elma Şekeri"],
+  "3": ["Bağlar Cad."],
+};
+
+function normText(t) {
+  return (t || "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s")
+    .replace(/ı/g, "i").replace(/ö/g, "o").replace(/ç/g, "c")
+    .replace(/[.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function currentGroupNo() {
+  const hatAdi = currentData?.hatAdi || knownVehicles[currentData?.plaka]?.hatAdi || "";
+  const m = /(\d+)\s*NOLU/i.exec(hatAdi);
+  return m ? m[1] : null;
+}
+
+function getSpecialStopNames() {
+  const g = currentGroupNo();
+  if (g) return SPECIAL_STOPS_BY_GROUP[g] || [];
+  // Grup anlaşılamazsa tüm özel durakları dikkate al
+  return Object.values(SPECIAL_STOPS_BY_GROUP).flat();
 }
 
 function isSpecialStop(stopName, specials) {
   if (!stopName) return false;
-  const name = stopName.toLocaleLowerCase("tr-TR");
-  return specials.some((s) => name.includes(s.toLocaleLowerCase("tr-TR")));
+  const name = normText(stopName);
+  return specials.some((s) => name.includes(normText(s)));
 }
 
 function delayBuckets() {
@@ -185,7 +206,7 @@ function delayBuckets() {
   let normal = 0;
   let special = 0;
   if (!currentData) return { normal, special };
-  const specials = parseSpecialStopNames();
+  const specials = getSpecialStopNames();
   for (const yon of currentData.yonler) {
     for (const sefer of yon.seferler) {
       for (const st of sefer.stops) {
@@ -209,7 +230,7 @@ function renderFee() {
   if (!currentData) return;
   const freeMinutes = Math.max(0, Number(freeMinutesInput.value) || 0);
   const rate = Math.max(0, Number(ratePerMinuteInput.value) || 0);
-  const specialRate = Math.max(0, Number(specialRateInput.value) || 0);
+  const specialRate = SPECIAL_RATE;
 
   const { normal, special } = delayBuckets();
   const total = normal + special;
@@ -230,8 +251,6 @@ function renderFee() {
 
 freeMinutesInput?.addEventListener("input", renderFee);
 ratePerMinuteInput?.addEventListener("input", renderFee);
-specialStopsInput?.addEventListener("input", renderFee);
-specialRateInput?.addEventListener("input", renderFee);
 
 // ---------- Yön özeti (sefer sayısı, ortalama/maks rötar) ----------
 

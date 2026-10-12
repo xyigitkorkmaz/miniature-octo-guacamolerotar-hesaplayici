@@ -275,21 +275,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
   font-size: 13px;
 }
 
-.fee-settings-special {
-  margin-bottom: 12px;
-  align-items: center;
-}
-
-.fee-special-label {
-  flex: 1;
-  min-width: 220px;
-}
-
-.fee-special-label input[type="text"] {
-  width: 100%;
-  flex: 1;
-}
-
 .fee-stats {
   display: flex;
   gap: 10px;
