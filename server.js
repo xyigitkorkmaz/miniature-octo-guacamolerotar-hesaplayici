@@ -73,6 +73,12 @@ async function initDb() {
     added += r.rowCount;
   }
   if (added) console.log(`vehicles.json'dan ${added} yeni araç veritabanına eklendi.`);
+  // vehicles.json'da OLMAYAN araçları veritabanından sil (liste = vehicles.json).
+  const keep = Object.values(seed).map((v) => normalizePlaka(v.plaka));
+  if (keep.length) {
+    const del = await pool.query("DELETE FROM vehicles WHERE NOT (plaka = ANY($1::text[]))", [keep]);
+    if (del.rowCount) console.log(`${del.rowCount} eski araç veritabanından silindi.`);
+  }
 }
 
 // Eski formatla aynı: { "34M1681": { plaka, vehicleId, hatId, kod, hatAdi }, ... }
