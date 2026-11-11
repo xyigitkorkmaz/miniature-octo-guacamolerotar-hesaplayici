@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cihazı kaydet — Rötar Hesaplayıcı</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#16202a; --muted:#6b7785; --line:#d9dfe5; --accent:#2f7df6; --err:#d63b3b; --ok:#1f9d55; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141a; --card:#171e26; --text:#e8edf2; --muted:#8a96a3; --line:#2a343f; --accent:#4d94ff; --err:#ff6b6b; --ok:#4cd08a; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text);
+         font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:16px; }
+  .card { width:100%; max-width:360px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px 24px; text-align:center; }
+  h1 { margin:0 0 8px; font-size:20px; }
+  p { margin:0 0 18px; color:var(--muted); font-size:14px; }
+  button { width:100%; padding:12px; font:inherit; font-weight:600; color:#fff; background:var(--accent); border:0; border-radius:8px; cursor:pointer; }
+  button:disabled { opacity:.6; }
+  .msg { min-height:20px; margin-top:14px; font-size:14px; }
+  .err { color:var(--err); } .ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Bu cihazı kaydet</h1>
+  <p>Kaydedilen cihaz bir daha şifre sormadan girer. Bunu sadece kendi telefonunda yap.</p>
+  <button id="b">Bu cihazı kaydet</button>
+  <div class="msg" id="m" role="alert"></div>
+</div>
+<script>
+  const b = document.getElementById("b"), m = document.getElementById("m");
+  b.addEventListener("click", async () => {
+    b.disabled = true; m.className = "msg"; m.textContent = "";
+    try {
+      const r = await fetch("/api/device/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: location.pathname.split("/")[2] || "" }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { m.className = "msg ok"; m.textContent = "Cihaz kaydedildi. Yönlendiriliyorsun…"; setTimeout(() => (location.href = "/"), 1200); return; }
+      m.className = "msg err"; m.textContent = d.error || "Kayıt başarısız";
+    } catch { m.className = "msg err"; m.textContent = "Bağlantı hatası, tekrar dene."; }
+    b.disabled = false;
+  });
+</script>
+</body>
+</html>
