@@ -60,19 +60,21 @@ async function initDb() {
       hat_adi    TEXT NOT NULL DEFAULT '',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
-  // vehicles.json'daki araçlardan veritabanında OLMAYANLARI ekle (var olanlara dokunmaz).
+  // vehicles.json'daki araçları veritabanına ekle/güncelle (liste = vehicles.json).
   // Böylece vehicles.json'a plaka ekleyip push etmek eskisi gibi çalışır.
   const seed = await readVehiclesFile();
   let added = 0;
   for (const v of Object.values(seed)) {
     const r = await pool.query(
       `INSERT INTO vehicles (plaka, vehicle_id, hat_id, kod, hat_adi)
-       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (plaka) DO NOTHING`,
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (plaka) DO UPDATE
+         SET vehicle_id = EXCLUDED.vehicle_id, hat_id = EXCLUDED.hat_id,
+             kod = EXCLUDED.kod, hat_adi = EXCLUDED.hat_adi, updated_at = now()`,
       [normalizePlaka(v.plaka), String(v.vehicleId), v.hatId || "", v.kod || "", v.hatAdi || ""]
     );
     added += r.rowCount;
   }
-  if (added) console.log(`vehicles.json'dan ${added} yeni araç veritabanına eklendi.`);
+  if (added) console.log(`vehicles.json'dan ${added} araç veritabanına eklendi/güncellendi.`);
   // vehicles.json'da OLMAYAN araçları veritabanından sil (liste = vehicles.json).
   const keep = Object.values(seed).map((v) => normalizePlaka(v.plaka));
   if (keep.length) {
@@ -302,6 +304,7 @@ function addDelayCalculations(parsed) {
         if (sec !== null) { startSec = sec; break; }
       }
 
+      sefer.gpsAcigiSayisi = sefer.stops.filter((x) => !x.giris).length;
       let prev = startSec;
       for (let s = 0; s < sefer.stops.length; s++) {
         const st = sefer.stops[s];
@@ -323,11 +326,20 @@ function addDelayCalculations(parsed) {
         if (actual !== null && planMedyan !== null) rotarMedyan = Math.round((actual - planMedyan) / 60);
         if (actual !== null && planRef !== null) rotarRef = Math.round((actual - planRef) / 60);
 
-        st.planlananMedyan = secondsToClock(planMedyan);
-        st.planlananReferans = secondsToClock(planRef);
-        st.rotarMedyanDk = rotarMedyan;
-        st.rotarReferansDk = rotarRef;
-        st.rotarSiteDk = st.siteRotar;
+        // Rötar artık doğrudan 3cmobil raporundaki değerden gelir (siteRotar).
+        // Eski hesaplama değerleri hesapMedyanDk / hesapReferansDk olarak saklanır.
+        const siteDk = st.siteRotar;
+        st.gpsAcigi = !st.giris; // bu durakta GPS'ten giriş saati yok
+        st.hesapMedyanDk = rotarMedyan;
+        st.hesapReferansDk = rotarRef;
+        st.rotarSiteDk = siteDk;
+        st.rotarMedyanDk = siteDk;
+        st.rotarReferansDk = siteDk;
+        // Planlanan saat = gerçek giriş - site rötarı (sadece site rötar verdiyse)
+        const planSite = actual !== null && siteDk !== null && siteDk !== undefined
+          ? Math.round(actual - siteDk * 60) : null;
+        st.planlananMedyan = secondsToClock(planSite);
+        st.planlananReferans = secondsToClock(planSite);
       }
     }
   }
