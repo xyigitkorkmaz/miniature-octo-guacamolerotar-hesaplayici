@@ -13,7 +13,7 @@ const resultPlaka = $("#resultPlaka");
 const resultMeta = $("#resultMeta");
 
 const freeMinutesInput = $("#freeMinutes");
-const ratePerMinuteInput = $("#ratePerMinute");
+const feeRateNoteEl = $("#feeRateNote");
 const feeTotalDelayEl = $("#feeTotalDelay");
 const feeBillableEl = $("#feeBillable");
 const feeTotalEl = $("#feeTotal");
@@ -161,11 +161,13 @@ function renderResult() {
 
 // ---------- Rötar ücreti hesaplama ----------
 
-// Özel duraklar (kodun içinde sabit). Grup numarasına göre belirlenir.
-const SPECIAL_RATE = 100; // ₺/dk
+// Tarife (sistemde sabit). Ayarlanabilir kutu yok; değiştirmek için burayı düzenle.
+// Normal duraklar 100 ₺/dk, özel duraklar 200 ₺/dk. Grup, raporun "N NOLU GRUP" yazısından anlaşılır.
+const RATE_NORMAL = 100;  // ₺/dk
+const RATE_SPECIAL = 200; // ₺/dk
 const SPECIAL_STOPS_BY_GROUP = {
-  "4": ["Akal Evler", "Elma Şekeri"],
-  "3": ["Bağlar Cad."],
+  "3": ["Happy Kavaklı"],
+  "4": ["Elma Şekeri", "Yonca Fırın"],
 };
 
 function normText(t) {
@@ -229,13 +231,13 @@ function totalDelayMinutes() {
 function renderFee() {
   if (!currentData) return;
   const freeMinutes = Math.max(0, Number(freeMinutesInput.value) || 0);
-  const rate = Math.max(0, Number(ratePerMinuteInput.value) || 0);
-  const specialRate = SPECIAL_RATE;
+  const rate = RATE_NORMAL;
+  const specialRate = RATE_SPECIAL;
 
   const { normal, special } = delayBuckets();
   const total = normal + special;
 
-  // İlk 15 dakikalık serbest süre önce normal (düşük ücretli) duraklardan
+  // Serbest süre önce normal (düşük ücretli) duraklardan
   // düşülür, kalan varsa özel duraklardan düşülür.
   const normalAfterFree = Math.max(0, normal - freeMinutes);
   const remainingFree = Math.max(0, freeMinutes - normal);
@@ -244,13 +246,13 @@ function renderFee() {
   const billable = normalAfterFree + specialAfterFree;
   const fee = Math.round(normalAfterFree * rate + specialAfterFree * specialRate);
 
+  if (feeRateNoteEl) feeRateNoteEl.textContent = `Normal ${RATE_NORMAL} ₺/dk · özel durak ${RATE_SPECIAL} ₺/dk`;
   feeTotalDelayEl.textContent = `${total} dk`;
   feeBillableEl.textContent = `${billable} dk`;
   feeTotalEl.textContent = `${fee.toLocaleString("tr-TR")} ₺`;
 }
 
 freeMinutesInput?.addEventListener("input", renderFee);
-ratePerMinuteInput?.addEventListener("input", renderFee);
 
 // ---------- Yön özeti (sefer sayısı, ortalama/maks rötar) ----------
 
@@ -339,7 +341,6 @@ function renderTable() {
     <tr>
       <td class="stop-name">${st.ad}</td>
       <td>${st.giris ?? "—"}</td>
-      <td>${st.cikis ?? "—"}</td>
       <td>${delayBadge(rotar)}</td>
     </tr>
   `;
@@ -351,7 +352,6 @@ function renderTable() {
         <tr>
           <th>Durak</th>
           <th>Giriş</th>
-          <th>Çıkış</th>
           <th>Rötar</th>
         </tr>
       </thead>

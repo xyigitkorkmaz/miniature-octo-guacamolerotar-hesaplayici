@@ -5,20 +5,22 @@
 
 Giriş/şifre/üyelik sistemi yok. Siteyi açan herkes direkt kullanır.
 
-## Özel duraklar (100 ₺/dk)
+## Tarife
 
-Sitedeki "Özel duraklar" kutusu kaldırıldı. Duraklar `public/app.js` başında sabit:
+Ücret sitede ayarlanmaz, kodda sabittir: her gecikme dakikası 100 ₺, özel duraklarda 200 ₺.
+"Serbest dk" kutusu duruyor (15). Tarife `public/app.js` başında (ve `server.js` içinde aynı liste):
 
 ```js
-const SPECIAL_RATE = 100; // ₺/dk
+const RATE_NORMAL = 100;  // ₺/dk
+const RATE_SPECIAL = 200; // ₺/dk
 const SPECIAL_STOPS_BY_GROUP = {
-  "4": ["Akal Evler", "Elma Şekeri"],
-  "3": ["Bağlar Cad."],
+  "3": ["Happy Kavaklı"],
+  "4": ["Elma Şekeri", "Yonca Fırın"],
 };
 ```
 
 Grup, raporun "N NOLU GRUP" yazısından anlaşılır. Durak eklemek/çıkarmak için bu listeyi
-düzenleyip push etmek yeterli. Büyük/küçük harf ve Türkçe karakter farkı sorun olmaz.
+iki dosyada da düzenleyip push etmek yeterli. Büyük/küçük harf ve Türkçe karakter farkı sorun olmaz.
 
 ## Gönderme
 

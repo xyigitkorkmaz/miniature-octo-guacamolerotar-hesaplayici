@@ -269,6 +269,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); }
   font-weight: 600;
 }
 
+.fee-note {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
 .fee-settings input {
   width: 60px;
   padding: 5px 7px;
