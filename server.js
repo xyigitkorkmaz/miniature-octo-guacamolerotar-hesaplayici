@@ -233,7 +233,8 @@ function parseReportHtml(html) {
       for (let i = 2; i < tds.length; i++) {
         const parsed = parseCell(tds[i]);
         const name = i - 2 < stopNames.length ? stopNames[i - 2] : `Durak ${i - 1}`;
-        stops.push({ ad: name, giris: parsed.giris, cikis: parsed.cikis, siteRotar: parsed.siteRotar });
+        // Sadece giriş saati kullanılır/gösterilir; çıkış saati bilerek boş bırakılır.
+        stops.push({ ad: name, giris: parsed.giris, cikis: null, siteRotar: parsed.siteRotar });
       }
 
       trips.push({ sefer, orer, stops });
@@ -346,6 +347,86 @@ function addDelayCalculations(parsed) {
   return parsed;
 }
 
+// ---------- Ücretlendirme ----------
+// Her gecikme dakikası 100 ₺; aşağıdaki özel duraklarda 200 ₺.
+// Grup, raporun "N NOLU GRUP" yazısından anlaşılır. Durak eklemek/çıkarmak için listeyi düzenle.
+const RATE_DEFAULT = 100; // ₺/dk
+const RATE_SPECIAL = 200; // ₺/dk
+const SPECIAL_STOPS_BY_GROUP = {
+  "3": ["Happy Kavaklı"],
+  "4": ["Elma Şekeri", "Yonca Fırın"],
+};
+
+function normStopName(name) {
+  return String(name || "")
+    .replace(/\[[^\]]*\]/g, "")
+    .toLocaleLowerCase("tr")
+    .replace(/ı/g, "i")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function groupNumber(hatAdi) {
+  const m = /(\d+)\s*NOLU/i.exec(hatAdi || "");
+  return m ? m[1] : null;
+}
+
+// Sadece gecikme (pozitif rötar) ücretlenir; erken/zamanında 0 ₺.
+function addPricing(parsed) {
+  const grup = groupNumber(parsed.hatAdi);
+  const specials = ((grup && SPECIAL_STOPS_BY_GROUP[grup]) || []).map(normStopName);
+  let toplamDk = 0;
+  let toplamTl = 0;
+
+  for (const yon of parsed.yonler) {
+    let yonDk = 0;
+    let yonTl = 0;
+    for (const sefer of yon.seferler) {
+      let seferDk = 0;
+      let seferTl = 0;
+      for (const st of sefer.stops) {
+        const n = normStopName(st.ad);
+        const ozel = specials.some((sp) => sp && n.includes(sp));
+        const rate = ozel ? RATE_SPECIAL : RATE_DEFAULT;
+        const dk = st.rotarSiteDk;
+        st.dakikaUcreti = rate;
+        st.ozelDurak = ozel;
+        if (dk === null || dk === undefined) {
+          st.gecikmeDk = null;
+          st.ucretTl = null;
+          continue;
+        }
+        const gecikme = dk > 0 ? dk : 0;
+        st.gecikmeDk = gecikme;
+        st.ucretTl = gecikme * rate;
+        seferDk += gecikme;
+        seferTl += st.ucretTl;
+      }
+      sefer.toplamGecikmeDk = seferDk;
+      sefer.toplamUcretTl = seferTl;
+      yonDk += seferDk;
+      yonTl += seferTl;
+    }
+    yon.toplamGecikmeDk = yonDk;
+    yon.toplamUcretTl = yonTl;
+    toplamDk += yonDk;
+    toplamTl += yonTl;
+  }
+
+  parsed.ucretOzet = {
+    grup,
+    tarife: RATE_DEFAULT,
+    ozelTarife: RATE_SPECIAL,
+    ozelDuraklar: SPECIAL_STOPS_BY_GROUP[grup] || [],
+    toplamGecikmeDk: toplamDk,
+    toplamUcretTl: toplamTl,
+  };
+  parsed.toplamGecikmeDk = toplamDk;
+  parsed.toplamUcretTl = toplamTl;
+  return parsed;
+}
+
 async function getReport(plakaIn, date, vehicleIdIn, hatIdIn) {
   const plaka = normalizePlaka(plakaIn);
   const known = await getVehicle(plaka);
@@ -384,6 +465,7 @@ async function getReport(plakaIn, date, vehicleIdIn, hatIdIn) {
 
   let parsed = parseReportHtml(html);
   parsed = addDelayCalculations(parsed);
+  parsed = addPricing(parsed);
   parsed.plaka = plaka;
   parsed.vehicleId = vehicleId;
   parsed.hatId = hatId;
