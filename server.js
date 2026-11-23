@@ -249,6 +249,7 @@ function parseReportHtml(html) {
 }
 
 function addDelayCalculations(parsed) {
+  const grupNo = groupNumber(parsed.hatAdi);
   for (const yon of parsed.yonler) {
     const stopCount = yon.duraklar.length;
     const offsetLists = Array.from({ length: stopCount }, () => []);
@@ -306,6 +307,8 @@ function addDelayCalculations(parsed) {
       }
 
       sefer.gpsAcigiSayisi = sefer.stops.filter((x) => !x.giris).length;
+      const orerSec = clockToSeconds(sefer.orer);
+      const planBase = orerSec !== null ? orerSec : startSec;
       let prev = startSec;
       for (let s = 0; s < sefer.stops.length; s++) {
         const st = sefer.stops[s];
@@ -341,10 +344,50 @@ function addDelayCalculations(parsed) {
           ? Math.round(actual - siteDk * 60) : null;
         st.planlananMedyan = secondsToClock(planSite);
         st.planlananReferans = secondsToClock(planSite);
+
+        // Sabit plan tanımlı durakta rötarı plandan hesapla.
+        const offSec = planOffsetSec(grupNo, st.ad);
+        if (offSec !== null && actual !== null && planBase !== null) {
+          const planSec = planBase + offSec;
+          const dk = Math.round((actual - planSec) / 60);
+          st.siteRotarOrijinalDk = siteDk;
+          st.rotarSiteDk = dk;
+          st.rotarMedyanDk = dk;
+          st.rotarReferansDk = dk;
+          st.sabitPlan = true;
+          st.planlananMedyan = secondsToClock(planSec);
+          st.planlananReferans = secondsToClock(planSec);
+        }
       }
     }
   }
   return parsed;
+}
+
+// ---------- Sabit sefer planı (durak süreleri) ----------
+// Değerler seferin başlangıcından itibaren geçen süredir: [dakika, saniye].
+// Burada tanımlı duraklar için rötar = gerçek giriş - (sefer başlangıcı + süre).
+// Listede olmayan duraklar eskisi gibi 3cmobil'in rötar değerini kullanır.
+const PLAN_BY_GROUP = {
+  "4": {
+    "taksi":        [7, 40],
+    "yonca firin":  [12, 40],
+    "vadi donus":   [50, 0],
+    "elma sekeri":  [55, 0],
+    "gul yapi":     [68, 0],   // 1 sa 08 dk
+    "hadimkoy":     [86, 0],   // 1 sa 26 dk
+    "saglik ocagi": [98, 0],   // 1 sa 38 dk
+  },
+};
+
+function planOffsetSec(grup, stopName) {
+  const plan = grup && PLAN_BY_GROUP[grup];
+  if (!plan) return null;
+  const n = normStopName(stopName).replace(/\s+/g, "");
+  for (const [key, [m, s]] of Object.entries(plan)) {
+    if (n.includes(key.replace(/\s+/g, ""))) return m * 60 + s;
+  }
+  return null;
 }
 
 // ---------- Ücretlendirme ----------
