@@ -1,4 +1,4 @@
-const CACHE = "rotar-v4";
+const CACHE = "rotar-v5";
 const SHELL = ["/", "/style.css", "/app.js", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

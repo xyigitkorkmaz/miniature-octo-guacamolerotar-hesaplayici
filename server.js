@@ -251,17 +251,41 @@ function parseReportHtml(html) {
 function addDelayCalculations(parsed) {
   const grupNo = groupNumber(parsed.hatAdi);
 
-  // Plan tanımlı duraklarda adı temizle ve yanına süreyi yaz (örn. "yonca [13 ]" -> "Yonca Fırın (12 dk 40 sn)").
+  // Plan tanımlı ve raporda [dk] ile işaretli duraklarda adı temizle ve yanına süreyi yaz
+  // (örn. "yonca [13 ]" -> "Yonca Fırın (12 dk 40 sn)"). İşaretsiz eşleşmelerde sadece ad düzeltilir, plan uygulanmaz.
   for (const yon of parsed.yonler) {
     yon.planOffsetSn = yon.duraklar.map((name, i) => {
       const pl = planFor(grupNo, name);
       if (!pl) return null;
-      yon.duraklar[i] = pl.ad;
-      for (const sefer of yon.seferler) if (sefer.stops[i]) sefer.stops[i].ad = pl.ad;
-      return pl.offsetSec;
+      const isaretli = hasPlanMark(name);
+      const yeniAd = isaretli ? pl.ad : pl.adSade;
+      yon.duraklar[i] = yeniAd;
+      for (const sefer of yon.seferler) if (sefer.stops[i]) sefer.stops[i].ad = yeniAd;
+      return isaretli ? pl.offsetSec : null;
     });
   }
-  for (const yon of parsed.yonler) {
+
+  // Sefer numarasına göre gidiş seferlerinin plan başlangıcı.
+  // Orer sütunu sitede 00:00:00 geliyor (= bilgi yok); onu gerçek saat sayma, ilk durak çıkışını kullan.
+  const validOrer = (sefer) => {
+    const sec = clockToSeconds(sefer.orer);
+    return sec !== null && sec > 0 ? sec : null;
+  };
+  const firstGiris = (sefer) => {
+    for (const st of sefer.stops) {
+      const sec = clockToSeconds(st.giris);
+      if (sec !== null) return sec;
+    }
+    return null;
+  };
+  const gidisBase = new Map();
+  if (parsed.yonler[0]) {
+    for (const sefer of parsed.yonler[0].seferler) {
+      const b = validOrer(sefer) ?? firstGiris(sefer);
+      if (b !== null) gidisBase.set(sefer.sefer, b);
+    }
+  }
+  for (const [yonIdx, yon] of parsed.yonler.entries()) {
     const stopCount = yon.duraklar.length;
     const offsetLists = Array.from({ length: stopCount }, () => []);
 
@@ -318,8 +342,16 @@ function addDelayCalculations(parsed) {
       }
 
       sefer.gpsAcigiSayisi = sefer.stops.filter((x) => !x.giris).length;
-      const orerSec = clockToSeconds(sefer.orer);
-      const planBase = orerSec !== null ? orerSec : startSec;
+      let planBase = null;
+      if (yonIdx === 0) {
+        planBase = validOrer(sefer) ?? startSec;
+      } else if (gidisBase.has(sefer.sefer)) {
+        planBase = gidisBase.get(sefer.sefer);
+      } else {
+        const fark = DONUS_BASLANGIC_SN[grupNo];
+        const b = validOrer(sefer) ?? startSec;
+        planBase = b !== null && fark ? b - fark : null;
+      }
       let prev = startSec;
       for (let s = 0; s < sefer.stops.length; s++) {
         const st = sefer.stops[s];
@@ -383,15 +415,24 @@ function addDelayCalculations(parsed) {
 // Listede olmayan duraklar eskisi gibi 3cmobil'in rötar değerini kullanır.
 const PLAN_BY_GROUP = {
   "4": [
-    { ad: "Taksi",        anahtar: ["taksi"],           sure: [7, 40] },
-    { ad: "Yonca Fırın",  anahtar: ["yonca"],           sure: [12, 40] },
-    { ad: "Vadi Dönüş",   anahtar: ["vadi"],            sure: [50, 0] },
-    { ad: "Elma Şekeri",  anahtar: ["elma"],            sure: [55, 0] },
-    { ad: "Gül Yapı",     anahtar: ["gul yapi", "gulyapi"], sure: [68, 0] },  // 1 sa 08 dk
-    { ad: "Hadımköy",     anahtar: ["hadimkoy", "hadim koy"], sure: [86, 0] }, // 1 sa 26 dk
-    { ad: "Sağlık Ocağı", anahtar: ["saglik ocagi", "saglik"], sure: [98, 0] }, // 1 sa 38 dk
+    { ad: "Siteler Taksi", anahtar: ["siteler taksi", "taksi"], sure: [7, 40] },
+    { ad: "Yonca Fırın",   anahtar: ["yonca"],                  sure: [12, 40] },
+    { ad: "Vadi Dönüş",    anahtar: ["vadi"],                   sure: [50, 0] },
+    { ad: "Elma Şekeri",   anahtar: ["elma"],                   sure: [55, 0] },
+    { ad: "Gül Yapı",      anahtar: ["gul yapi", "gulyapi"],    sure: [68, 0] },  // 1 sa 08 dk
+    { ad: "Hadım Köy",     anahtar: ["hadim"],                  sure: [86, 0] },  // 1 sa 26 dk (raporda "Hadim K.M")
+    { ad: "Sağlık Ocağı",  anahtar: ["s ocagi", "saglik"],      sure: [98, 0] },  // 1 sa 38 dk (raporda "S.Ocağı")
   ],
 };
+
+// Süreler gidiş seferinin başlangıcından itibaren birikimlidir (Vadi Dönüş 50 dk, Elma Şekeri 55 dk = 50 + 5 ...).
+// Dönüş tablosundaki seferin planı da aynı numaralı gidiş seferinin başlangıcına göre hesaplanır.
+// Eşleşen gidiş seferi yoksa dönüş başlangıcı = Vadi Dönüş süresi kabul edilir.
+const DONUS_BASLANGIC_SN = { "4": 50 * 60 };
+
+// Raporda planı olan duraklar başlıkta "[8 ]" gibi köşeli parantezle işaretlidir.
+// Sabit plan sadece bu işaretli duraklara uygulanır (ör. dönüşteki işaretsiz "yonca" etkilenmez).
+const hasPlanMark = (name) => /\[\s*\d+\s*\]/.test(name || "");
 
 function formatSure(totalSec) {
   const h = Math.floor(totalSec / 3600);
@@ -413,7 +454,7 @@ function planFor(grup, stopName) {
   for (const e of list) {
     if (e.anahtar.some((k) => n.includes(k) || nc.includes(k.replace(/\s+/g, "")))) {
       const sec = e.sure[0] * 60 + e.sure[1];
-      return { ad: `${e.ad} (${formatSure(sec)})`, offsetSec: sec };
+      return { ad: `${e.ad} (${formatSure(sec)})`, adSade: e.ad, offsetSec: sec };
     }
   }
   return null;
