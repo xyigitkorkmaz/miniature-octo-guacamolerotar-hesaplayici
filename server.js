@@ -250,6 +250,17 @@ function parseReportHtml(html) {
 
 function addDelayCalculations(parsed) {
   const grupNo = groupNumber(parsed.hatAdi);
+
+  // Plan tanımlı duraklarda adı temizle ve yanına süreyi yaz (örn. "yonca [13 ]" -> "Yonca Fırın (12 dk 40 sn)").
+  for (const yon of parsed.yonler) {
+    yon.planOffsetSn = yon.duraklar.map((name, i) => {
+      const pl = planFor(grupNo, name);
+      if (!pl) return null;
+      yon.duraklar[i] = pl.ad;
+      for (const sefer of yon.seferler) if (sefer.stops[i]) sefer.stops[i].ad = pl.ad;
+      return pl.offsetSec;
+    });
+  }
   for (const yon of parsed.yonler) {
     const stopCount = yon.duraklar.length;
     const offsetLists = Array.from({ length: stopCount }, () => []);
@@ -346,7 +357,7 @@ function addDelayCalculations(parsed) {
         st.planlananReferans = secondsToClock(planSite);
 
         // Sabit plan tanımlı durakta rötarı plandan hesapla.
-        const offSec = planOffsetSec(grupNo, st.ad);
+        const offSec = yon.planOffsetSn[s] ?? null;
         if (offSec !== null && actual !== null && planBase !== null) {
           const planSec = planBase + offSec;
           const dk = Math.round((actual - planSec) / 60);
@@ -365,27 +376,45 @@ function addDelayCalculations(parsed) {
 }
 
 // ---------- Sabit sefer planı (durak süreleri) ----------
-// Değerler seferin başlangıcından itibaren geçen süredir: [dakika, saniye].
-// Burada tanımlı duraklar için rötar = gerçek giriş - (sefer başlangıcı + süre).
+// Her kayıt: ad = ekranda görünecek temiz isim, anahtar = rapordaki durak adında
+// aranacak kelime(ler) (büyük/küçük harf ve Türkçe karakter fark etmez),
+// sure = seferin başlangıcından itibaren [dakika, saniye].
+// Burada tanımlı duraklarda rötar = gerçek giriş - (sefer başlangıcı + süre).
 // Listede olmayan duraklar eskisi gibi 3cmobil'in rötar değerini kullanır.
 const PLAN_BY_GROUP = {
-  "4": {
-    "taksi":        [7, 40],
-    "yonca firin":  [12, 40],
-    "vadi donus":   [50, 0],
-    "elma sekeri":  [55, 0],
-    "gul yapi":     [68, 0],   // 1 sa 08 dk
-    "hadimkoy":     [86, 0],   // 1 sa 26 dk
-    "saglik ocagi": [98, 0],   // 1 sa 38 dk
-  },
+  "4": [
+    { ad: "Taksi",        anahtar: ["taksi"],           sure: [7, 40] },
+    { ad: "Yonca Fırın",  anahtar: ["yonca"],           sure: [12, 40] },
+    { ad: "Vadi Dönüş",   anahtar: ["vadi"],            sure: [50, 0] },
+    { ad: "Elma Şekeri",  anahtar: ["elma"],            sure: [55, 0] },
+    { ad: "Gül Yapı",     anahtar: ["gul yapi", "gulyapi"], sure: [68, 0] },  // 1 sa 08 dk
+    { ad: "Hadımköy",     anahtar: ["hadimkoy", "hadim koy"], sure: [86, 0] }, // 1 sa 26 dk
+    { ad: "Sağlık Ocağı", anahtar: ["saglik ocagi", "saglik"], sure: [98, 0] }, // 1 sa 38 dk
+  ],
 };
 
-function planOffsetSec(grup, stopName) {
-  const plan = grup && PLAN_BY_GROUP[grup];
-  if (!plan) return null;
-  const n = normStopName(stopName).replace(/\s+/g, "");
-  for (const [key, [m, s]] of Object.entries(plan)) {
-    if (n.includes(key.replace(/\s+/g, ""))) return m * 60 + s;
+function formatSure(totalSec) {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const sn = totalSec % 60;
+  const parts = [];
+  if (h) parts.push(`${h} sa`);
+  if (m || h) parts.push(`${h ? String(m).padStart(2, "0") : m} dk`);
+  if (sn) parts.push(`${sn} sn`);
+  return parts.join(" ");
+}
+
+// Rapordaki durak adı -> { ad: "Yonca Fırın (12 dk 40 sn)", offsetSec } ya da null
+function planFor(grup, stopName) {
+  const list = grup && PLAN_BY_GROUP[grup];
+  if (!list) return null;
+  const n = normStopName(stopName);
+  const nc = n.replace(/\s+/g, "");
+  for (const e of list) {
+    if (e.anahtar.some((k) => n.includes(k) || nc.includes(k.replace(/\s+/g, "")))) {
+      const sec = e.sure[0] * 60 + e.sure[1];
+      return { ad: `${e.ad} (${formatSure(sec)})`, offsetSec: sec };
+    }
   }
   return null;
 }
